@@ -3,37 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Snake Game - Universal Edition</title>
+  <title>Snake Game - Wall Wrap Edition</title>
   <style>
-    body{ font-family:Arial; background:#0f172a; color:white; margin:0; overflow-x: hidden; }
+    body{ font-family:Arial; background:#0f172a; color:white; margin:0; overflow: hidden; }
     h1{ text-align:center; margin-top:20px; }
     .game-layout{ position:relative; width:100%; display: flex; flex-direction: column; align-items: center; }
-    
-    .leaderboard-panel{ 
-      width:200px; background:#020617; border:2px solid #22c55e; 
-      padding:15px; border-radius:8px; margin: 10px;
-    }
-
-    /* Desktop positioning for leaderboard */
-    @media (min-width: 900px) {
-      .leaderboard-panel { position: absolute; left: 40px; top: 80px; }
-    }
-
+    .leaderboard-panel{ width:200px; background:#020617; border:2px solid #22c55e; padding:15px; border-radius:8px; margin: 10px; }
+    @media (min-width: 900px) { .leaderboard-panel { position: absolute; left: 40px; top: 80px; } }
     #leaderboard{ list-style:none; padding:0; }
     #leaderboard li{ background:#0f172a; border:1px solid #22c55e; padding:8px; margin:6px 0; border-radius:6px; font-size: 14px; }
     .game-panel{ width:100%; max-width:420px; text-align:center; }
-    
-    canvas{ 
-      background:#020617; border:4px solid #22c55e; 
-      display:block; margin:20px auto; 
-      max-width: 90vw; height: auto;
-      touch-action: none; /* CRITICAL: Stops tablet from scrolling while playing */
-    }
-
-    button{ 
-      padding:10px 20px; font-size:16px; margin:5px; cursor:pointer; 
-      border:none; border-radius:6px; background:#22c55e; color:black; font-weight:bold; 
-    }
+    canvas{ background:#020617; border:4px solid #22c55e; display:block; margin:20px auto; max-width: 90vw; height: auto; touch-action: none; }
+    button{ padding:10px 20px; font-size:16px; margin:5px; cursor:pointer; border:none; border-radius:6px; background:#22c55e; color:black; font-weight:bold; }
     button:hover{ background:#16a34a; }
   </style>
 </head>
@@ -50,7 +31,7 @@
   <div class="game-panel">
     <h2>Score: <span id="score">0</span></h2>
     <h3>High Score: <span id="highScore">0</span></h3>
-    <p>Swipe or use Arrows to move. Press P to Pause.</p>
+    <p>Swipe or Arrows to move. Walls are now Portals!</p>
     <button id="startBtn">Start Game</button>
     <button id="restartBtn" style="display:none;">Restart Game</button>
     <canvas id="gameCanvas" width="400" height="400"></canvas>
@@ -58,37 +39,29 @@
 </div>
 
 <script>
-/** * COMBINED GAME ENGINE 
- * Supports: Keyboard (PC) + Swipe (Tablet)
- */
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const startBtn = document.getElementById("startBtn");
 const restartBtn = document.getElementById("restartBtn");
 
 const box = 20;
-let snake, direction, food, score, game, speed, paused = false;
-let goldenFood = null, redFoodCounter = 0, playerName = "Player";
-
-// Load Leaderboard & Highscore
+let snake, direction, food, score, game, paused = false;
+let playerName = "Player";
 let highScore = localStorage.getItem("snakeHighScore") || 0;
 document.getElementById("highScore").innerText = highScore;
 let leaderboard = JSON.parse(localStorage.getItem("snakeLeaderboard")) || [];
 
-/* --- 1. PC KEYBOARD CONTROLS --- */
+/* --- CONTROLS (PC & TABLET) --- */
 document.addEventListener("keydown", (e) => {
-    if (e.key === "p" || e.key === "P") togglePause();
+    if (e.key === "p" || e.key === "P") paused = !paused;
     if (paused) return;
     if (e.keyCode == 37 && direction != "RIGHT") direction = "LEFT";
     else if (e.keyCode == 38 && direction != "DOWN") direction = "UP";
     else if (e.keyCode == 39 && direction != "LEFT") direction = "RIGHT";
     else if (e.keyCode == 40 && direction != "UP") direction = "DOWN";
-    
-    // Prevent arrow keys from scrolling the page
     if([37, 38, 39, 40].includes(e.keyCode)) e.preventDefault();
 });
 
-/* --- 2. TABLET SWIPE CONTROLS --- */
 let touchStartX = 0, touchStartY = 0;
 canvas.addEventListener('touchstart', (e) => {
     touchStartX = e.changedTouches[0].screenX;
@@ -96,17 +69,9 @@ canvas.addEventListener('touchstart', (e) => {
 }, {passive: false});
 
 canvas.addEventListener('touchend', (e) => {
-    let touchEndX = e.changedTouches[0].screenX;
-    let touchEndY = e.changedTouches[0].screenY;
-    handleSwipe(touchEndX, touchEndY);
-}, {passive: false});
-
-function handleSwipe(endX, endY) {
-    if (paused) return;
-    const xDiff = endX - touchStartX;
-    const yDiff = endY - touchStartY;
-    if (Math.abs(xDiff) < 15 && Math.abs(yDiff) < 15) return; // Ignore tiny taps
-
+    let xDiff = e.changedTouches[0].screenX - touchStartX;
+    let yDiff = e.changedTouches[0].screenY - touchStartY;
+    if (Math.abs(xDiff) < 15 && Math.abs(yDiff) < 15) return;
     if (Math.abs(xDiff) > Math.abs(yDiff)) {
         if (xDiff > 0 && direction !== "LEFT") direction = "RIGHT";
         else if (xDiff < 0 && direction !== "RIGHT") direction = "LEFT";
@@ -114,120 +79,17 @@ function handleSwipe(endX, endY) {
         if (yDiff > 0 && direction !== "UP") direction = "DOWN";
         else if (yDiff < 0 && direction !== "DOWN") direction = "UP";
     }
-}
+}, {passive: false});
 
-/* --- 3. CORE GAME LOGIC --- */
+/* --- GAME LOGIC --- */
 function initGame() {
     snake = [{x: 9 * box, y: 10 * box}];
     direction = "RIGHT";
     score = 0;
-    speed = 100;
-    redFoodCounter = 0;
     paused = false;
     document.getElementById("score").innerText = score;
     spawnFood();
-    updateLeaderboard();
 }
 
 function spawnFood() {
-    food = { x: Math.floor(Math.random()*19+1)*box, y: Math.floor(Math.random()*19+1)*box };
-}
-
-function draw() {
-    if (paused) return;
-    ctx.fillStyle = "#020617";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    for (let i = 0; i < snake.length; i++) {
-        ctx.fillStyle = (i == 0) ? "#22c55e" : "#16a34a";
-        ctx.fillRect(snake[i].x, snake[i].y, box, box);
-        ctx.strokeStyle = "#020617";
-        ctx.strokeRect(snake[i].x, snake[i].y, box, box);
-    }
-
-    ctx.fillStyle = "red";
-    ctx.fillRect(food.x, food.y, box, box);
-
-    let headX = snake[0].x;
-    let headY = snake[0].y;
-
-    if (direction == "LEFT") headX -= box;
-    if (direction == "UP") headY -= box;
-    if (direction == "RIGHT") headX += box;
-    if (direction == "DOWN") headY += box;
-
-    // Eat Food
-    if (headX == food.x && headY == food.y) {
-        score++;
-        document.getElementById("score").innerText = score;
-        spawnFood();
-    } else {
-        snake.pop();
-    }
-
-    let newHead = { x: headX, y: headY };
-
-    // Game Over Conditions
-    if (headX < 0 || headX >= canvas.width || headY < 0 || headY >= canvas.height || collision(newHead, snake)) {
-        return endGame();
-    }
-
-    snake.unshift(newHead);
-}
-
-function collision(head, array) {
-    for (let i = 0; i < array.length; i++) {
-        if (head.x == array[i].x && head.y == array[i].y) return true;
-    }
-    return false;
-}
-
-function endGame() {
-    clearInterval(game);
-    saveScore();
-    restartBtn.style.display = "inline-block";
-}
-
-function togglePause() {
-    paused = !paused;
-}
-
-function updateLeaderboard() {
-    const board = document.getElementById("leaderboard");
-    board.innerHTML = "";
-    leaderboard.slice(0, 5).forEach((p, i) => {
-        const li = document.createElement("li");
-        li.innerText = `${i+1}. ${p.name} - ${p.score}`;
-        board.appendChild(li);
-    });
-}
-
-function saveScore() {
-    if (score > highScore) {
-        highScore = score;
-        localStorage.setItem("snakeHighScore", highScore);
-        document.getElementById("highScore").innerText = highScore;
-    }
-    leaderboard.push({name: playerName, score: score});
-    leaderboard.sort((a, b) => b.score - a.score);
-    localStorage.setItem("snakeLeaderboard", JSON.stringify(leaderboard));
-    updateLeaderboard();
-}
-
-startBtn.onclick = () => {
-    playerName = prompt("Enter your name:") || "Player";
-    initGame();
-    startBtn.style.display = "none";
-    game = setInterval(draw, 100);
-};
-
-restartBtn.onclick = () => {
-    initGame();
-    restartBtn.style.display = "none";
-    game = setInterval(draw, 100);
-};
-
-updateLeaderboard();
-</script>
-</body>
-</html>
+    food = { x
