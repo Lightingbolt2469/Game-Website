@@ -1,8 +1,13 @@
- /*
+/*
  * HexGL
  * @author Thibaut 'BKcore' Despoulain <http://bkcore.com>
  * @license This work is licensed under the Creative Commons Attribution-NonCommercial 3.0 Unported License.
  *          To view a copy of this license, visit http://creativecommons.org/licenses/by-nc/3.0/.
+ *
+ * Touch controls improved by Crypto Alan:
+ *   - Virtual joystick on left side for steering
+ *   - Accelerate button on right side
+ *   - Full multitouch support
  */
 
 var bkcore = bkcore || {};
@@ -120,26 +125,213 @@ bkcore.hexgl.ShipControls = function(ctx)
 
 	this.touchController = null;
 	this.orientationController = null;
-	this.gamepadController = null
+	this.gamepadController = null;
 
+	// ── TOUCH MODE (controlType == 1) ─────────────────────────────────────────
 	if(ctx.controlType == 1 && bkcore.controllers.TouchController.isCompatible())
 	{
+		// Create the touch UI overlay
+		var touchUI = document.createElement('div');
+		touchUI.id = 'hexgl-touch-ui';
+		touchUI.style.cssText = [
+			'position:fixed',
+			'bottom:0',
+			'left:0',
+			'width:100%',
+			'height:220px',
+			'z-index:9999',
+			'pointer-events:none',
+			'display:flex',
+			'align-items:flex-end',
+			'justify-content:space-between',
+			'padding:0 24px 24px 24px',
+			'box-sizing:border-box'
+		].join(';');
+
+		// ── Joystick (left) ──────────────────────────────────────────────────
+		var joystickWrap = document.createElement('div');
+		joystickWrap.style.cssText = [
+			'position:relative',
+			'width:130px',
+			'height:130px',
+			'pointer-events:auto'
+		].join(';');
+
+		var joystickBase = document.createElement('div');
+		joystickBase.style.cssText = [
+			'position:absolute',
+			'inset:0',
+			'border-radius:50%',
+			'background:rgba(0,255,231,0.08)',
+			'border:2px solid rgba(0,255,231,0.3)',
+			'box-shadow:0 0 20px rgba(0,255,231,0.15)'
+		].join(';');
+
+		var joystickKnob = document.createElement('div');
+		joystickKnob.style.cssText = [
+			'position:absolute',
+			'width:50px',
+			'height:50px',
+			'border-radius:50%',
+			'background:rgba(0,255,231,0.25)',
+			'border:2px solid rgba(0,255,231,0.7)',
+			'box-shadow:0 0 12px rgba(0,255,231,0.4)',
+			'top:50%',
+			'left:50%',
+			'transform:translate(-50%,-50%)',
+			'transition:box-shadow 0.1s'
+		].join(';');
+
+		joystickWrap.appendChild(joystickBase);
+		joystickWrap.appendChild(joystickKnob);
+
+		// ── Accelerate button (right) ────────────────────────────────────────
+		var accelBtn = document.createElement('div');
+		accelBtn.style.cssText = [
+			'width:110px',
+			'height:110px',
+			'border-radius:50%',
+			'background:rgba(255,45,120,0.12)',
+			'border:2px solid rgba(255,45,120,0.4)',
+			'box-shadow:0 0 20px rgba(255,45,120,0.15)',
+			'display:flex',
+			'align-items:center',
+			'justify-content:center',
+			'pointer-events:auto',
+			'user-select:none',
+			'-webkit-user-select:none',
+			'font-family:Orbitron,monospace',
+			'font-size:11px',
+			'letter-spacing:2px',
+			'color:rgba(255,45,120,0.8)',
+			'transition:background 0.1s, box-shadow 0.1s'
+		].join(';');
+		accelBtn.textContent = 'THRUST';
+
+		touchUI.appendChild(joystickWrap);
+		touchUI.appendChild(accelBtn);
+		document.body.appendChild(touchUI);
+
+		// ── Joystick state ───────────────────────────────────────────────────
+		var jsRadius   = 65;   // half width of joystickWrap
+		var jsDeadzone = 12;   // pixels before steering registers
+		var jsTouchId  = null;
+		var jsBaseX    = 0;
+		var jsBaseY    = 0;
+
+		// ── Accelerate state ─────────────────────────────────────────────────
+		var accelTouchId = null;
+
+		function setAccelActive(on) {
+			self.key.forward = on;
+			accelBtn.style.background    = on ? 'rgba(255,45,120,0.35)' : 'rgba(255,45,120,0.12)';
+			accelBtn.style.boxShadow     = on ? '0 0 30px rgba(255,45,120,0.6)' : '0 0 20px rgba(255,45,120,0.15)';
+			accelBtn.style.borderColor   = on ? 'rgba(255,45,120,0.9)'  : 'rgba(255,45,120,0.4)';
+		}
+
+		function updateJoystick(dx) {
+			// Clamp knob inside base circle
+			var clamped = Math.max(-jsRadius, Math.min(jsRadius, dx));
+			joystickKnob.style.left      = (65 + clamped) + 'px';
+			joystickKnob.style.transform = 'translate(-50%,-50%) translateY(0)';
+
+			if (dx < -jsDeadzone) {
+				self.key.left  = true;
+				self.key.right = false;
+				joystickKnob.style.boxShadow = '0 0 18px rgba(0,255,231,0.8)';
+			} else if (dx > jsDeadzone) {
+				self.key.left  = false;
+				self.key.right = true;
+				joystickKnob.style.boxShadow = '0 0 18px rgba(0,255,231,0.8)';
+			} else {
+				self.key.left  = false;
+				self.key.right = false;
+				joystickKnob.style.boxShadow = '0 0 12px rgba(0,255,231,0.4)';
+			}
+		}
+
+		function resetJoystick() {
+			self.key.left  = false;
+			self.key.right = false;
+			joystickKnob.style.left      = '50%';
+			joystickKnob.style.transform = 'translate(-50%,-50%)';
+			joystickKnob.style.boxShadow = '0 0 12px rgba(0,255,231,0.4)';
+			jsTouchId = null;
+		}
+
+		// Get element bounding rect helper
+		function getRect(el) { return el.getBoundingClientRect(); }
+
+		// ── Touch events on joystick ─────────────────────────────────────────
+		joystickWrap.addEventListener('touchstart', function(e) {
+			e.preventDefault();
+			if (jsTouchId !== null) return;
+			var t = e.changedTouches[0];
+			jsTouchId = t.identifier;
+			var rect = getRect(joystickWrap);
+			jsBaseX = rect.left + rect.width / 2;
+			jsBaseY = rect.top  + rect.height / 2;
+			updateJoystick(t.clientX - jsBaseX);
+		}, { passive: false });
+
+		joystickWrap.addEventListener('touchmove', function(e) {
+			e.preventDefault();
+			for (var i = 0; i < e.changedTouches.length; i++) {
+				var t = e.changedTouches[i];
+				if (t.identifier === jsTouchId) {
+					updateJoystick(t.clientX - jsBaseX);
+				}
+			}
+		}, { passive: false });
+
+		joystickWrap.addEventListener('touchend', function(e) {
+			e.preventDefault();
+			for (var i = 0; i < e.changedTouches.length; i++) {
+				if (e.changedTouches[i].identifier === jsTouchId) {
+					resetJoystick();
+				}
+			}
+		}, { passive: false });
+
+		joystickWrap.addEventListener('touchcancel', function(e) {
+			resetJoystick();
+		}, { passive: false });
+
+		// ── Touch events on accelerate button ───────────────────────────────
+		accelBtn.addEventListener('touchstart', function(e) {
+			e.preventDefault();
+			if (accelTouchId !== null) return;
+			accelTouchId = e.changedTouches[0].identifier;
+			setAccelActive(true);
+		}, { passive: false });
+
+		accelBtn.addEventListener('touchend', function(e) {
+			e.preventDefault();
+			for (var i = 0; i < e.changedTouches.length; i++) {
+				if (e.changedTouches[i].identifier === accelTouchId) {
+					accelTouchId = null;
+					setAccelActive(false);
+				}
+			}
+		}, { passive: false });
+
+		accelBtn.addEventListener('touchcancel', function(e) {
+			accelTouchId = null;
+			setAccelActive(false);
+		}, { passive: false });
+
+		// Keep the old touchController alive for restart/reload gestures only
 		this.touchController = new bkcore.controllers.TouchController(
 			domElement, ctx.width/2,
-			function(state, touch, event){
-				if(event.touches.length >= 4)
+			function(state, touch, event) {
+				if (event.touches.length >= 4)
 					window.location.reload(false);
-				else if(event.touches.length == 3)
+				else if (event.touches.length == 3)
 					ctx.restart();
-				// touch was on the right-hand side of the screen
-				else if (touch.clientX > (ctx.width / 2)) {
-					if (event.type === 'touchend')
-						self.key.forward = false;
-					else
-						self.key.forward = true;
-				}
-			});
+			}
+		);
 	}
+	// ── ORIENTATION MODE (controlType == 4) ──────────────────────────────────
 	else if(ctx.controlType == 4 && bkcore.controllers.OrientationController.isCompatible())
 	{
 		this.orientationController = new bkcore.controllers.OrientationController(
@@ -155,20 +347,22 @@ bkcore.hexgl.ShipControls = function(ctx)
 					self.key.forward = true;
 			});
 	}
+	// ── GAMEPAD MODE (controlType == 3) ──────────────────────────────────────
 	else if(ctx.controlType == 3 && bkcore.controllers.GamepadController.isCompatible())
 	{
 		this.gamepadController = new bkcore.controllers.GamepadController(
-      function(controller){
-        if (controller.select)
-          ctx.restart();
-        else
-          self.key.forward = controller.acceleration > 0;
-          self.key.ltrigger = controller.ltrigger > 0;
-          self.key.rtrigger = controller.rtrigger > 0;
-          self.key.left = controller.lstickx < -0.1;
-          self.key.right = controller.lstickx > 0.1;
-      });
+			function(controller){
+				if (controller.select)
+					ctx.restart();
+				else
+					self.key.forward = controller.acceleration > 0;
+					self.key.ltrigger = controller.ltrigger > 0;
+					self.key.rtrigger = controller.rtrigger > 0;
+					self.key.left = controller.lstickx < -0.1;
+					self.key.right = controller.lstickx > 0.1;
+			});
 	}
+	// ── LEAP MOTION (controlType == 2) ───────────────────────────────────────
 	else if(ctx.controlType == 2)
 	{
 		if(Leap == null)
@@ -206,7 +400,7 @@ bkcore.hexgl.ShipControls = function(ctx)
 		}
 		updateInfo();
 
-		var lc = this.leapController =  new Leap.Controller({enableGestures: false});
+		var lc = this.leapController = new Leap.Controller({enableGestures: false});
 		lc.on('connect', function()
 		{
 			isServerConnected = true;
@@ -225,7 +419,7 @@ bkcore.hexgl.ShipControls = function(ctx)
 		lc.on('frame', function(frame)
 		{
 			if(!lb.isConnected) return;
-		  hand = frame.hands[0];
+			hand = frame.hands[0];
 			if(typeof hand === 'undefined')
 			{
 				if(lb.hasHands)
@@ -248,48 +442,43 @@ bkcore.hexgl.ShipControls = function(ctx)
 		lc.connect();
 	}
 
+	// ── KEYBOARD (default / controlType == 0) ────────────────────────────────
 	function onKeyDown(event)
 	{
 		switch(event.keyCode)
 		{
-			case 38: /*up*/	self.key.forward = true; break;
-
-			case 40: /*down*/self.key.backward = true; break;
-
-			case 37: /*left*/self.key.left = true; break;
-
-			case 39: /*right*/self.key.right = true; break;
-
-			case 81: /*Q*/self.key.ltrigger = true; break;
-			case 65: /*A*/self.key.ltrigger = true; break;
-
-			case 68: /*D*/self.key.rtrigger = true; break;
-			case 69: /*E*/self.key.rtrigger = true; break;
+			case 38: /*up*/    self.key.forward  = true; break;
+			case 87: /*W*/     self.key.forward  = true; break;
+			case 40: /*down*/  self.key.backward = true; break;
+			case 83: /*S*/     self.key.backward = true; break;
+			case 37: /*left*/  self.key.left     = true; break;
+			case 65: /*A*/     self.key.left     = true; break;
+			case 39: /*right*/ self.key.right    = true; break;
+			case 68: /*D*/     self.key.right    = true; break;
+			case 81: /*Q*/     self.key.ltrigger = true; break;
+			case 69: /*E*/     self.key.rtrigger = true; break;
 		}
-	};
+	}
 
 	function onKeyUp(event)
 	{
 		switch(event.keyCode)
 		{
-			case 38: /*up*/	self.key.forward = false; break;
-
-			case 40: /*down*/self.key.backward = false; break;
-
-			case 37: /*left*/self.key.left = false; break;
-
-			case 39: /*right*/self.key.right = false; break;
-
-			case 81: /*Q*/self.key.ltrigger = false; break;
-			case 65: /*A*/self.key.ltrigger = false; break;
-
-			case 68: /*D*/self.key.rtrigger = false; break;
-			case 69: /*E*/self.key.rtrigger = false; break;
+			case 38: /*up*/    self.key.forward  = false; break;
+			case 87: /*W*/     self.key.forward  = false; break;
+			case 40: /*down*/  self.key.backward = false; break;
+			case 83: /*S*/     self.key.backward = false; break;
+			case 37: /*left*/  self.key.left     = false; break;
+			case 65: /*A*/     self.key.left     = false; break;
+			case 39: /*right*/ self.key.right    = false; break;
+			case 68: /*D*/     self.key.right    = false; break;
+			case 81: /*Q*/     self.key.ltrigger = false; break;
+			case 69: /*E*/     self.key.rtrigger = false; break;
 		}
-	};
+	}
 
 	domElement.addEventListener('keydown', onKeyDown, false);
-	domElement.addEventListener('keyup', onKeyUp, false);
+	domElement.addEventListener('keyup',   onKeyUp,   false);
 };
 
 bkcore.hexgl.ShipControls.prototype.control = function(threeMesh)
@@ -323,18 +512,22 @@ bkcore.hexgl.ShipControls.prototype.reset = function(position, rotation)
 
 	this.mesh.matrix.identity();
 	this.mesh.applyMatrix(this.dummy.matrix);
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.terminate = function()
 {
 	this.destroy();
+
+	// Remove touch UI if present
+	var ui = document.getElementById('hexgl-touch-ui');
+	if (ui) ui.parentNode.removeChild(ui);
 
 	if(this.leapController != null)
 	{
 		this.leapController.disconnect();
 		this.leapInfo.style.display = 'none';
 	}
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.destroy = function()
 {
@@ -347,7 +540,7 @@ bkcore.hexgl.ShipControls.prototype.destroy = function()
 	this.collision.front = false;
 	this.collision.left = false;
 	this.collision.right = false;
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.fall = function()
 {
@@ -360,7 +553,7 @@ bkcore.hexgl.ShipControls.prototype.fall = function()
 	setTimeout(function(){
 		_this.destroyed = true;
 	}, 1500);
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.update = function(dt)
 {
@@ -387,7 +580,6 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 
 	if(this.active)
 	{
-
 		if(this.touchController != null)
 		{
 			angularAmount -= this.touchController.stickVector.x/100 * this.angularSpeed * dt;
@@ -426,6 +618,7 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 			this.speed += this.thrust * dt;
 		else
 			this.speed -= this.airResist * dt;
+
 		if(this.key.ltrigger)
 		{
 			if(this.key.left)
@@ -476,12 +669,8 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 
 	this.boosterCheck(dt);
 
-	//this.movement.multiplyScalar(dt);
-	//this.rotation.multiplyScalar(dt);
-
 	this.dummy.translateX(this.movement.x);
 	this.dummy.translateZ(this.movement.z);
-
 
 	this.heightCheck(dt);
 	this.dummy.translateY(this.movement.y);
@@ -506,7 +695,6 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 	{
 		this.mesh.matrix.identity();
 
-		// Gradient (Mesh only, no dummy physics impact)
 		var gradientDelta = (this.gradientTarget - (yawLeap + this.gradient)) * this.gradientLerp;
 		if(Math.abs(gradientDelta) > this.epsilon) this.gradient += gradientDelta;
 		if(Math.abs(this.gradient) > this.epsilon)
@@ -515,7 +703,6 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 			this.mesh.matrix.rotateByAxis(this.gradientAxis, this.gradient);
 		}
 
-		// Tilting (Idem)
 		var tiltDelta = (this.tiltTarget - this.tilt) * this.tiltLerp;
 		if(Math.abs(tiltDelta) > this.epsilon) this.tilt += tiltDelta;
 		if(Math.abs(this.tilt) > this.epsilon)
@@ -524,7 +711,6 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 			this.mesh.matrix.rotateByAxis(this.tiltAxis, this.tilt);
 		}
 
-		// Rolling (Idem)
 		var rollDelta = (rollAmount - this.roll) * this.rollLerp;
 		if(Math.abs(rollDelta) > this.epsilon) this.roll += rollDelta;
 		if(Math.abs(this.roll) > this.epsilon)
@@ -537,7 +723,6 @@ bkcore.hexgl.ShipControls.prototype.update = function(dt)
 		this.mesh.updateMatrixWorld(true);
 	}
 
-	//Update listener position
 	bkcore.Audio.setListenerPos(this.movement);
 	bkcore.Audio.setListenerVelocity(this.currentVelocity);
 };
@@ -550,15 +735,12 @@ bkcore.hexgl.ShipControls.prototype.teleport = function(pos, quat)
 	this.dummy.position.copy(pos);
 	this.dummy.matrix.setPosition(this.dummy.position);
 
-	//console.log(pos.x, pos.y, pos.z);
-
 	this.dummy.matrix.setRotationFromQuaternion(this.dummy.quaternion);
 
 	if(this.mesh != null)
 	{
 		this.mesh.matrix.identity();
 
-		// Gradient (Mesh only, no dummy physics impact)
 		var gradientDelta = (this.gradientTarget - this.gradient) * this.gradientLerp;
 		if(Math.abs(gradientDelta) > this.epsilon) this.gradient += gradientDelta;
 		if(Math.abs(this.gradient) > this.epsilon)
@@ -567,7 +749,6 @@ bkcore.hexgl.ShipControls.prototype.teleport = function(pos, quat)
 			this.mesh.matrix.rotateByAxis(this.gradientAxis, this.gradient);
 		}
 
-		// Tilting (Idem)
 		var tiltDelta = (this.tiltTarget - this.tilt) * this.tiltLerp;
 		if(Math.abs(tiltDelta) > this.epsilon) this.tilt += tiltDelta;
 		if(Math.abs(this.tilt) > this.epsilon)
@@ -579,7 +760,7 @@ bkcore.hexgl.ShipControls.prototype.teleport = function(pos, quat)
 		this.mesh.applyMatrix(this.dummy.matrix);
 		this.mesh.updateMatrixWorld(true);
 	}
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.boosterCheck = function(dt)
 {
@@ -604,7 +785,7 @@ bkcore.hexgl.ShipControls.prototype.boosterCheck = function(dt)
 	}
 
 	this.movement.z += this.boost * dt;
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.collisionCheck = function(dt)
 {
@@ -622,19 +803,15 @@ bkcore.hexgl.ShipControls.prototype.collisionCheck = function(dt)
 	var z = Math.round(this.collisionMap.pixels.height/2 + this.dummy.position.z * this.collisionPixelRatio);
 	var pos = new THREE.Vector3(x, 0, z);
 
-	//console.log({c: this.collisionMap.getPixel(414, 670), d: this.dummy.position, x: x, y: y, p: this.collisionMap.getPixel(x, y)})
-
 	var collision = this.collisionMap.getPixelBilinear(x, z);
 
 	if(collision.r < 255)
 	{
 		bkcore.Audio.play('crash');
 
-		// Shield
 		var sr = (this.getRealSpeed() / this.maxSpeed);
 		this.shield -= sr * sr * 0.8 * this.shieldDamage;
 
-		// Repulsion
 		this.repulsionVLeft.set(1,0,0);
 		this.repulsionVRight.set(-1,0,0);
 		this.dummy.matrix.rotateAxis(this.repulsionVLeft);
@@ -650,28 +827,26 @@ bkcore.hexgl.ShipControls.prototype.collisionCheck = function(dt)
 		this.repulsionAmount = Math.max(0.8,
 			Math.min(this.repulsionCap,
 				this.speed * this.repulsionRatio
-				)
-			);
+			)
+		);
 
 		if(rCol > lCol)
-		{// Repulse right
+		{
 			this.repulsionForce.x += -this.repulsionAmount;
 			this.collision.left = true;
 		}
 		else if(rCol < lCol)
-		{// Repulse left
+		{
 			this.repulsionForce.x += this.repulsionAmount;
 			this.collision.right = true;
 		}
 		else
 		{
-			//console.log(collision.r+"  --  "+fCol+"  @  "+lCol+"  /  "+rCol);
 			this.repulsionForce.z += -this.repulsionAmount*4;
 			this.collision.front = true;
 			this.speed = 0;
 		}
 
-		// DIRTY GAMEOVER
 		if(rCol < 128 && lCol < 128)
 		{
 			var fCol = this.collisionMap.getPixel(Math.round(pos.x+2), Math.round(pos.z+2)).r;
@@ -692,7 +867,7 @@ bkcore.hexgl.ShipControls.prototype.collisionCheck = function(dt)
 	{
 		return false;
 	}
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.heightCheck = function(dt)
 {
@@ -708,18 +883,12 @@ bkcore.hexgl.ShipControls.prototype.heightCheck = function(dt)
 	if(height < 16777)
 	{
 		var delta = (height - this.dummy.position.y);
-
 		if(delta > 0)
-		{
 			this.movement.y += delta;
-		}
 		else
-		{
 			this.movement.y += delta * this.heightLerp;
-		}
 	}
 
-	// gradient
 	this.gradientVector.set(0,0,5);
 	this.dummy.matrix.rotateAxis(this.gradientVector);
 	this.gradientVector.addSelf(this.dummy.position);
@@ -728,11 +897,9 @@ bkcore.hexgl.ShipControls.prototype.heightCheck = function(dt)
 	z = this.heightMap.pixels.height/2 + this.gradientVector.z * this.heightPixelRatio;
 
 	var nheight = this.heightMap.getPixelFBilinear(x, z) / this.heightScale + this.heightBias;
-
 	if(nheight < 16777)
 		this.gradientTarget = -Math.atan2(nheight-height, 5.0)*this.gradientScale;
 
-	// tilt
 	this.tiltVector.set(5,0,0);
 	this.dummy.matrix.rotateAxis(this.tiltVector);
 	this.tiltVector.addSelf(this.dummy.position);
@@ -742,13 +909,11 @@ bkcore.hexgl.ShipControls.prototype.heightCheck = function(dt)
 
 	nheight = this.heightMap.getPixelFBilinear(x, z) / this.heightScale + this.heightBias;
 
-	if(nheight >= 16777) // If right project out of bounds, try left projection
+	if(nheight >= 16777)
 	{
 		this.tiltVector.subSelf(this.dummy.position).multiplyScalar(-1).addSelf(this.dummy.position);
-
 		x = this.heightMap.pixels.width/2 + this.tiltVector.x * this.heightPixelRatio;
 		z = this.heightMap.pixels.height/2 + this.tiltVector.z * this.heightPixelRatio;
-
 		nheight = this.heightMap.getPixelFBilinear(x, z) / this.heightScale + this.heightBias;
 	}
 
@@ -774,7 +939,7 @@ bkcore.hexgl.ShipControls.prototype.getRealSpeedRatio = function()
 
 bkcore.hexgl.ShipControls.prototype.getSpeedRatio = function()
 {
-	return (this.speed+this.boost)/ this.maxSpeed;
+	return (this.speed+this.boost) / this.maxSpeed;
 };
 
 bkcore.hexgl.ShipControls.prototype.getBoostRatio = function()
@@ -798,9 +963,9 @@ bkcore.hexgl.ShipControls.prototype.getShield = function(scale)
 bkcore.hexgl.ShipControls.prototype.getPosition = function()
 {
 	return this.dummy.position;
-}
+};
 
 bkcore.hexgl.ShipControls.prototype.getQuaternion = function()
 {
 	return this.dummy.quaternion;
-}
+};
